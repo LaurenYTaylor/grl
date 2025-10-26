@@ -1,0 +1,1 @@
+nohup sh -c 'parallel -j 32 --results logs/ --joblog job_history_killed.log < run_killed_commands.txt ; parallel -j 32 --results logs/ --joblog job_history_ft.log < run_finetune_commands.txt ; parallel -j 32 --results logs/ --joblog job_history_iqlcql.log < run_iqlcql_commands.txt' &

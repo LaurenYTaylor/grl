@@ -1,6 +1,8 @@
 import os
 from functools import partial
+os.environ["LD_LIBRARY_PATH"] = os.environ["LD_LIBRARY_PATH"]+":/usr/lib/nvidia"
 
+from mj_envs import mj_envs
 import gym
 import jax
 import numpy as np
@@ -70,7 +72,7 @@ flags.DEFINE_bool("use_redq", False, "Use an ensemble of Q-functions for the age
 flags.DEFINE_integer("seed", 0, "Random seed.")
 flags.DEFINE_string(
     "save_dir",
-    os.path.expanduser("~/wsrl_log"),
+    os.path.expanduser(os.getcwd()+"/exp_logging"),
     "Directory to save the logs and checkpoints",
 )
 flags.DEFINE_string("resume_path", "", "Path to resume from")
@@ -108,6 +110,7 @@ def main(_):
     if FLAGS.use_redq:
         FLAGS.config.agent_kwargs = add_redq_config(FLAGS.config.agent_kwargs)
 
+    breakpoint()
     min_steps_to_update = FLAGS.batch_size * (1 - FLAGS.offline_data_ratio)
     if FLAGS.agent == "calql":
         min_steps_to_update = max(
@@ -125,11 +128,14 @@ def main(_):
             "exp_descriptor": f"{FLAGS.exp_name}_{FLAGS.env}_{FLAGS.agent}_seed{FLAGS.seed}",
         }
     )
+   
+
     wandb_logger = WandBLogger(
         wandb_config=wandb_config,
         variant=FLAGS.config.to_dict(),
         random_str_in_identifier=True,
         disable_online_logging=FLAGS.debug,
+        wandb_output_dir=FLAGS.save_dir
     )
 
     save_dir = os.path.join(
@@ -137,6 +143,8 @@ def main(_):
         wandb_logger.config.project,
         f"{wandb_logger.config.exp_descriptor}_{wandb_logger.config.unique_identifier}",
     )
+        
+
 
     """
     env
@@ -415,9 +423,12 @@ def main(_):
         """
         Logging
         """
+        print(f"{step}/{FLAGS.num_offline_steps + FLAGS.num_online_steps}")
         if step % FLAGS.log_interval == 0:
+            print(f"{step}/{FLAGS.num_offline_steps + FLAGS.num_online_steps}, logging if update info...")
             # check if update_info is available (False during warmup)
             if "update_info" in locals():
+                print(f"{step}/{FLAGS.num_offline_steps + FLAGS.num_online_steps}, logging...")
                 update_info = jax.device_get(update_info)
                 wandb_logger.log({"training": update_info}, step=step)
 

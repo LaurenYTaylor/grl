@@ -1,0 +1,5 @@
+bash experiments/scripts/antmaze/launch_wsrl_finetune.sh --env antmaze-medium-diverse-v2 --resume_path "/home/lt/Documents/Code/wsrl/exp_logging/wsrl/$(ls exp_logging/wsrl/ | grep '^_antmaze-medium-diverse-v2')/checkpoint_1000000"
+bash experiments/scripts/adroit/launch_calql_finetune.sh --use_redq --env pen-binary-v0
+bash experiments/scripts/adroit/launch_calql_finetune.sh --use_redq --env door-binary-v0
+bash experiments/scripts/antmaze/launch_calql_finetune.sh --use_redq --env antmaze-large-diverse-v2
+bash experiments/scripts/antmaze/launch_calql_finetune.sh --use_redq --env antmaze-large-play-v2

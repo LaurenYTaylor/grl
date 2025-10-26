@@ -1,0 +1,21 @@
+bash experiments/scripts/antmaze/launch_calql_finetune.sh --use_redq --env antmaze-umaze-v2
+bash experiments/scripts/antmaze/launch_wsrl_finetune.sh --env antmaze-umaze-v2 --resume_path "exp_logging/wsrl/$(ls exp_logging/wsrl/ | grep '^_antmaze-umaze-v2')/checkpoint_1000000"
+bash experiments/scripts/antmaze/launch_calql_finetune.sh --use_redq --env antmaze-umaze-diverse-v2
+bash experiments/scripts/antmaze/launch_wsrl_finetune.sh --env antmaze-large-diverse-v2 --resume_path /path/to/checkpoint
+bash experiments/scripts/antmaze/launch_calql_finetune.sh --use_redq --env antmaze-medium-diverse-v2
+bash experiments/scripts/antmaze/launch_calql_finetune.sh --use_redq --env antmaze-medium-play-v2
+bash experiments/scripts/antmaze/launch_calql_finetune.sh --use_redq --env antmaze-large-diverse-v2
+bash experiments/scripts/antmaze/launch_calql_finetune.sh --use_redq --env antmaze-large-play-v2
+bash experiments/scripts/antmaze/launch_calql_finetune.sh --use_redq --env antmaze-ultra-play-v2
+bash experiments/scripts/antmaze/launch_calql_finetune.sh --use_redq --env antmaze-ultra-diverse-v2
+bash experiments/scripts/adroit/launch_calql_finetune.sh --use_redq --env pen-binary-v0
+bash experiments/scripts/adroit/launch_calql_finetune.sh --use_redq --env door-binary-v0
+bash experiments/scripts/locomotion/launch_cql_finetune.sh --use_redq --env halfcheetah-medium-replay-v2
+bash experiments/scripts/locomotion/launch_cql_finetune.sh --use_redq --env halfcheetah-random-v2
+bash experiments/scripts/locomotion/launch_cql_finetune.sh --use_redq --env halfcheetah-expert-v2
+bash experiments/scripts/locomotion/launch_cql_finetune.sh --use_redq --env hopper-medium-replay-v2
+bash experiments/scripts/locomotion/launch_cql_finetune.sh --use_redq --env hopper-random-v2
+bash experiments/scripts/locomotion/launch_cql_finetune.sh --use_redq --env hopper-expert-v2
+bash experiments/scripts/locomotion/launch_cql_finetune.sh --use_redq --env walker2d-medium-replay-v2
+bash experiments/scripts/locomotion/launch_cql_finetune.sh --use_redq --env walker2d-random-v2
+bash experiments/scripts/locomotion/launch_cql_finetune.sh --use_redq --env walker2d-expert-v2

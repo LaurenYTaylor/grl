@@ -1,0 +1,1 @@
+nohup sh -c 'parallel -j 32 --results logs/ --joblog job_history.log < run_killed_commands.txt' &
