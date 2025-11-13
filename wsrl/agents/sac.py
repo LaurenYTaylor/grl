@@ -420,6 +420,7 @@ class SACAgent(flax.struct.PyTreeNode):
     def sample_actions(
         self,
         observations: Data,
+        env_step: int,
         *,
         seed: Optional[PRNGKey] = None,
         argmax: bool = False,
@@ -453,7 +454,7 @@ class SACAgent(flax.struct.PyTreeNode):
     def update_config(self, new_config):
         """update the frozen self.config"""
         object.__setattr__(self, "config", self.config.copy(new_config))
-
+        
     @classmethod
     def _create_common(
         cls,

@@ -9,11 +9,7 @@ def get_config(updates=None):
     config.temperature = 10.0
     config.target_update_rate = 5e-3
     config.actor_type = "awr"
-    config.n_curriculum_stages = 10
-    config.guide_policy_path = ""
-    config.eval_interval = 10000
-    config.online_sampling_method = "mixed"
-    
+    config.alpha = 0.1
 
     config.critic_ensemble_size = 2
     config.critic_subsample_size = None
@@ -25,7 +21,6 @@ def get_config(updates=None):
             kernel_scale_final=1e-2,
         )
     )
-    #config.policy_network_kwargs.use_layer_norm = True
     config.critic_network_kwargs=ConfigDict(
         dict(
             hidden_dims=(256, 256),

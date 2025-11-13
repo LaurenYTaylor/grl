@@ -54,7 +54,7 @@ def evaluate_with_trajectories(
         add_to(stats, flatten(info))
         done = False
         while not done:
-            action = policy_fn(observation)
+            action = policy_fn(observation, len(trajectory["rewards"]))
             action = np.clip(action, -clip_action, clip_action)
             next_observation, r, terminated, truncated, info = env.step(action)
             done = terminated or truncated

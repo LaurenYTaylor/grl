@@ -75,6 +75,33 @@ class ModuleDict(nn.Module):
 
         return self.modules[name](*args, **kwargs)
 
+class FrozenTrainState(struct.PyTreeNode):
+    """
+    Attributes:
+        step: The current training step.
+        apply_fn: The function used to apply the model.
+    """
+
+    apply_fn: Callable = struct.field(pytree_node=False)
+    params: Params
+    rng: PRNGKey
+
+    @classmethod
+    def create(
+        cls, *, apply_fn, params, rng=jax.random.PRNGKey(0)
+    ):
+        """
+        Initializes a new train state.
+
+        Args:
+            apply_fn: The function used to apply the model, typically `model_def.apply`.
+            rng: The rng key used to initialize the rng chain for `apply_loss_fns`.
+        """
+        return cls(
+            apply_fn=apply_fn,
+            params=params,
+            rng=rng,
+        )
 
 class JaxRLTrainState(struct.PyTreeNode):
     """

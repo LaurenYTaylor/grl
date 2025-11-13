@@ -1,6 +1,6 @@
 import copy
 from functools import partial
-from typing import Optional
+from typing import Optional, Any
 
 import chex
 import flax
@@ -10,10 +10,6 @@ import jax.numpy as jnp
 import numpy as np
 from flax.core import FrozenDict
 from flax.training import checkpoints
-from flax import core as flax_core
-from absl import logging
-import os
-import sys
 
 from wsrl.common.common import JaxRLTrainState, FrozenTrainState, ModuleDict, nonpytree_field
 from wsrl.common.optimizers import make_optimizer
@@ -90,21 +86,102 @@ def ddpg_bc_actor_loss(q, dist, actions, bc_loss_weight, mask=None):
         "actor_loss": actor_loss,
     }
 
+class GuideAgent(flax.struct.PyTreeNode):
+    state: FrozenTrainState
+    def forward_policy(
+        self,
+        observations: Data,
+        rng: Optional[PRNGKey] = None,
+        *,
+        grad_params: Optional[Params] = None,
+        train: bool = False,
+    ):
+        """
+        Forward pass for policy network.
+        Pass grad_params to use non-default parameters (e.g. for gradients)
+        """
+        if train:
+            assert rng is not None, "Must specify rng when training"
+        return self.state.apply_fn(
+            {"params": grad_params or self.state.params},
+            observations,
+            name="actor",
+            rngs={},
+            train=train,
+        )
+        
+    @partial(jax.jit, static_argnames="argmax")
+    def sample_actions(
+        self,
+        observations: np.ndarray,
+        env_step: int,
+        *,
+        seed: Optional[PRNGKey] = None,
+        argmax=True,
+    ) -> jnp.ndarray:
+        dist = self.forward_policy(observations, seed, train=False)
+        if argmax:
+            assert seed is None, "Cannot specify seed when sampling deterministically"
+            actions = dist.mode()
+        else:
+            actions = dist.sample(seed=seed)
+        return actions
+    
+    @classmethod
+    def create(
+        cls,
+        rng: PRNGKey,
+        observations: FrozenDict,
+        actions: jnp.ndarray,
+        # Model architecture
+        encoder_def: nn.Module,
+        policy_network_kwargs: dict = {
+            "hidden_dims": [256, 256],
+            "kernel_init_type": "var_scaling",
+            "kernel_scale_final": 1e-2,
+        },
+        policy_kwargs: dict = {
+            "tanh_squash_distribution": False,
+            "std_parameterization": "exp",
+        }
+    ):
+        encoders = {"actor": encoder_def}
+        
+        networks = {
+            "actor": Policy(
+                encoders["actor"],
+                MLP(**policy_network_kwargs),
+                action_dim=actions.shape[-1],
+                **policy_kwargs,
+            ),
+        }
+        
+        model_def = ModuleDict(networks)
+        rng, init_rng = jax.random.split(rng)
+        params = model_def.init(
+            rng,
+            actor=[observations],
+        )["params"]
+        
+        state = FrozenTrainState.create(
+            apply_fn=model_def.apply,
+            params=params
+        )
 
-class JSRLAgent(flax.struct.PyTreeNode):
+        return cls(state)
+
+        
+class JSRLRandomAgent(flax.struct.PyTreeNode):
     state: JaxRLTrainState
     config: dict = nonpytree_field()
-    # Optional guide policy params (not part of the pytree by default)
-    guide_policy: Optional[Params] = nonpytree_field()
-    # Number of curriculum stages.
-    n_curriculum_stages: nonpytree_field() = 10
-    # Time step at which to start using the learner policy exclusively.
-    cmprtr: float = jax.numpy.inf
+    guide: flax.struct.PyTreeNode
+    decay_factor: float
+    # Probability of selecting the guide policy (1.0 = always guide, 0.0 = always learner).
+    # This will be decayed during finetuning when evaluation improves.
+    cmprtr: float = 1.0
     # Best evaluation score observed for decaying cmprtr (optional).
     best_eval_score: Optional[float] = None
-    # Decay factor applied to cmprtr when eval improves.
-    decay_factor: int = 0
-    
+    # Multiplicative decay factor applied to cmprtr when eval improves.
 
     def forward_policy(
         self,
@@ -118,7 +195,6 @@ class JSRLAgent(flax.struct.PyTreeNode):
         Forward pass for policy network.
         Pass grad_params to use non-default parameters (e.g. for gradients)
         """
-        #breakpoint()
         if train:
             assert rng is not None, "Must specify rng when training"
         return self.state.apply_fn(
@@ -277,7 +353,6 @@ class JSRLAgent(flax.struct.PyTreeNode):
             critic_fn = self.forward_critic
 
         rng, key = jax.random.split(rng)
-        jax.debug.print("Policy loss")
         dist = self.forward_policy(batch["observations"], key, grad_params=params)
         mask = batch.get("actor_loss_mask", None)
 
@@ -362,15 +437,20 @@ class JSRLAgent(flax.struct.PyTreeNode):
         # use and one for sampling from the chosen policy.
         key = jax.random.PRNGKey(seed[0] if seed is not None else 0)
         sel_key, sample_key = jax.random.split(key)
-        # Pack (observations, sample_key) as the single operand so
+
+        # Draw a JAX scalar and use jax.lax.cond to select which policy to
+        # call. We pack (observations, sample_key) as the single operand so
         # branch functions accept one argument.
+
+        guide_or_learner = jax.random.uniform(sel_key)
+
         operand = (observations, sample_key)
 
         def guide_branch(args):
             obs, rng = args
-            dist = self.forward_policy(obs, rng, grad_params=self.guide_policy, train=False)
-            #jax.debug.print("Using guide policy: {}", dist.mode())
+            dist = self.guide.forward_policy(obs, rng, grad_params=None, train=False)
             action = dist.mode()
+            #jax.debug.print("guide: {}", action)
             return action
 
         def learner_branch(args):
@@ -380,20 +460,16 @@ class JSRLAgent(flax.struct.PyTreeNode):
                 action = dist.mode()
             else:
                 action = dist.sample(seed=rng)
-            #jax.debug.print("Using learner policy: {}", action)
+            #jax.debug.print("learner: {}", action)
             return action
 
         # Use the class attribute `cmprtr` to decide which branch to run. This
         # keeps the method jittable while allowing `cmprtr` to be updated on the
         # Python side by replacing the agent (agent = agent.replace(cmprtr=...)).
-        
-        #jax.lax.cond(env_step > self.cmprtr, lambda x: jax.debug.print("Using learner policy at env step {}", x), lambda x: x, env_step)
-            
-        actions = jax.lax.cond(env_step > self.cmprtr, learner_branch, guide_branch, operand)
-
+        actions = jax.lax.cond(guide_or_learner < self.cmprtr, guide_branch, learner_branch, operand)
         return actions
 
-    def eval_callback(self, avg_return: float, avg_length: int) -> "JSRLAgent":
+    def eval_callback(self, avg_return: float, _: Any) -> "JSRLRandomAgent":
         """
         Called after an evaluation. If the provided avg_return improves upon
         the stored `best_eval_score`, update `best_eval_score` and decay
@@ -401,21 +477,19 @@ class JSRLAgent(flax.struct.PyTreeNode):
         instance (PyTree) with updated fields.
         """
         # If no previous score, treat this as an improvement.
-        
         if (self.best_eval_score is None) or (avg_return >= self.best_eval_score):
             new_best = float(avg_return)
-            if (self.best_eval_score is None):
-                new_cmprtr = avg_length
-                decay_factor = jax.numpy.floor(avg_length/self.n_curriculum_stages)
-                return self.replace(cmprtr=new_cmprtr, best_eval_score=new_best, decay_factor=decay_factor)
-            else:
+            print(f"Prev best: {self.best_eval_score}, New best: {new_best}")
+            if (self.best_eval_score is not None):
                 new_cmprtr = float(max(0.0, self.cmprtr - self.decay_factor))
                 return self.replace(cmprtr=new_cmprtr, best_eval_score=new_best)
+            # No previous best: update best_eval_score and return the new agent
+            return self.replace(best_eval_score=new_best)
         return self
 
     @jax.jit
     def get_debug_metrics(self, batch, **kwargs):
-        jax.debug.print("Debug metrics")
+
         dist = self.forward_policy(batch["observations"], train=False)
         pi_actions = dist.mode()
         log_probs = dist.log_prob(batch["actions"])
@@ -560,38 +634,17 @@ class JSRLAgent(flax.struct.PyTreeNode):
         )
         
         guide_policy_path = kwargs.get("guide_policy_path", "")
-        jax.debug.print("GUIDE POLICY PATH: {}", guide_policy_path)
-        guide_policy = None
-        if guide_policy_path:
-            n_curriculum_stages = kwargs.get("n_curriculum_stages", 10)
-            if os.path.exists(guide_policy_path):
-                try:
-                    ckpt = checkpoints.restore_checkpoint(guide_policy_path, target=None)
-                except Exception as e:
-                    logging.error("Failed to restore checkpoint %s: %s", guide_policy_path, e)
-                    sys.exit(1)
-
-                params = ckpt["state"]["params"]
-                mutable_params = flax_core.unfreeze(params)
-                mutable_params.pop("modules_critic", None)
-                mutable_params.pop("modules_value", None)
-
-                if ("modules_actor" not in mutable_params) and ("actor" not in mutable_params):
-                    logging.error(
-                        "No actor params found in checkpoint %s (looked for 'modules_actor' or 'actor').",
-                        guide_policy_path,
-                    )
-                    sys.exit(1)
-
-                guide_policy = flax_core.freeze(mutable_params)
-                logging.info(
-                    "Loaded params from checkpoint %s into agent.guide_policy (critic/value removed where present).",
-                    guide_policy_path,
-                )
-            else:
-                logging.error("guide_policy_path specified but file not found: %s", guide_policy_path)
-                sys.exit(1)
-        assert(guide_policy is not None, "a guide_policy must be provided through the guide_policy_path kwarg")
+        guide_policy = GuideAgent.create(
+            rng=rng,
+            observations=observations,
+            actions=actions,
+            encoder_def=encoder_def,
+            policy_kwargs=policy_kwargs,
+            policy_network_kwargs=policy_network_kwargs,
+        )
         
-        n_curriculum_stages = kwargs.get("n_curriculum_stages", 10)
-        return cls(state, config, guide_policy, n_curriculum_stages=n_curriculum_stages)
+        guide = checkpoints.restore_checkpoint(guide_policy_path, target=guide_policy)
+        
+        decay_factor = 1/kwargs.get("n_curriculum_stages", 10)
+
+        return cls(state, config, guide, decay_factor)

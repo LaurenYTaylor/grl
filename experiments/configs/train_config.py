@@ -4,7 +4,10 @@ from experiments.configs.cql_config import get_config as get_cql_config
 from experiments.configs.iql_config import get_config as get_iql_config
 from experiments.configs.sac_config import get_config as get_sac_config
 from experiments.configs.wsrl_config import get_config as get_wsrl_config
-
+from experiments.configs.jsrl_config import get_config as get_jsrl_config
+from experiments.configs.jsrl_calql_config import get_config as get_jsrl_calql_config
+from experiments.configs.pex_config import get_config as get_pex_config
+from experiments.configs.grl_config import get_config as get_grl_config
 
 def get_config(config_string):
 
@@ -49,10 +52,85 @@ def get_config(config_string):
                 ).to_dict(),
             )
         ),
+        
+        "antmaze_jsrl":ConfigDict(
+            dict(
+                agent_kwargs=get_jsrl_config(
+                    updates=dict(
+                        expectile=0.9,
+                        temperature=10.0,
+                    )
+                ).to_dict(),
+            )
+        ),
+
+        "antmaze_jsrl_calql": ConfigDict(
+            dict(
+                agent_kwargs=get_jsrl_calql_config(
+                    updates=dict(
+                        policy_kwargs=dict(
+                            tanh_squash_distribution=True,
+                            std_parameterization="uniform",
+                        ),
+                        critic_network_kwargs={
+                            "hidden_dims": [256, 256, 256, 256],
+                            "activations": "relu",
+                            "kernel_scale_final": 1e-2,
+                            "use_layer_norm": True,
+                        },
+                        policy_network_kwargs={
+                            "hidden_dims": [256, 256],
+                            "activations": "relu",
+                            "kernel_scale_final": 1e-2,
+                            "use_layer_norm": True,
+                        },
+                        max_target_backup=True,
+                    )
+                ).to_dict(),
+            )
+        ),
+        
+        "antmaze_pex":ConfigDict(
+            dict(
+                agent_kwargs=get_pex_config(
+                    updates=dict(
+                        expectile=0.9,
+                        temperature=10.0,
+                        alpha=0.1,
+                    )
+                ).to_dict(),
+            )
+        ),
 
         "antmaze_wsrl": ConfigDict(
             dict(
                 agent_kwargs=get_wsrl_config(
+                    updates=dict(
+                        policy_kwargs=dict(
+                            tanh_squash_distribution=True,
+                            std_parameterization="uniform",
+                        ),
+                        critic_network_kwargs={
+                            "hidden_dims": [256, 256, 256, 256],
+                            "activations": "relu",
+                            "kernel_scale_final": 1e-2,
+                            "use_layer_norm": True,
+                        },
+                        policy_network_kwargs={
+                            "hidden_dims": [256, 256],
+                            "activations": "relu",
+                            "kernel_scale_final": 1e-2,
+                            "use_layer_norm": True,
+                        },
+                        max_target_backup=True,
+                    )
+                ).to_dict(),
+            )
+        ),
+        
+        "antmaze_grl": ConfigDict(
+            dict(
+                agent_kwargs=get_grl_config(
                     updates=dict(
                         policy_kwargs=dict(
                             tanh_squash_distribution=True,
@@ -249,6 +327,18 @@ def get_config(config_string):
                     updates=dict(
                         expectile=0.7,
                         temperature=3.0,
+                    )
+                ).to_dict(),
+            )
+        ),
+
+        "locomotion_pex":ConfigDict(
+            dict(
+                agent_kwargs=get_pex_config(
+                    updates=dict(
+                        expectile=0.9,
+                        temperature=10.0,
+                        alpha=0.333,
                     )
                 ).to_dict(),
             )

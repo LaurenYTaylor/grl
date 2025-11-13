@@ -61,6 +61,7 @@ class BCAgent(flax.struct.PyTreeNode):
     def sample_actions(
         self,
         observations: np.ndarray,
+        env_step: int,
         *,
         seed: Optional[PRNGKey] = None,
         temperature: float = 1.0,

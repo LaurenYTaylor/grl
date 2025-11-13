@@ -25,6 +25,9 @@ from wsrl.envs.env_common import get_env_type, make_gym_env
 from wsrl.utils.timer_utils import Timer
 from wsrl.utils.train_utils import concatenate_batches, subsample_batch
 
+import flax
+flax.config.update('flax_use_orbax_checkpointing', True)
+
 FLAGS = flags.FLAGS
 
 # env
@@ -76,6 +79,7 @@ flags.DEFINE_string(
     "Directory to save the logs and checkpoints",
 )
 flags.DEFINE_string("resume_path", "", "Path to resume from")
+flags.DEFINE_string("guide_policy_path", "", "Path to restore guide agent from")
 flags.DEFINE_integer("log_interval", 5_000, "Log every n steps")
 flags.DEFINE_integer("eval_interval", 20_000, "Evaluate every n steps")
 flags.DEFINE_integer("save_interval", 100_000, "Save every n steps.")
@@ -109,8 +113,10 @@ def main(_):
 
     if FLAGS.use_redq:
         FLAGS.config.agent_kwargs = add_redq_config(FLAGS.config.agent_kwargs)
+        
+    if "guide_policy_path" in FLAGS.config.agent_kwargs:
+        FLAGS.config.agent_kwargs["guide_policy_path"] = FLAGS.guide_policy_path
 
-    breakpoint()
     min_steps_to_update = FLAGS.batch_size * (1 - FLAGS.offline_data_ratio)
     if FLAGS.agent == "calql":
         min_steps_to_update = max(
@@ -195,6 +201,8 @@ def main(_):
                 reward_bias=FLAGS.reward_bias,
                 clip_action=FLAGS.clip_action,
             )
+            # if FLAGS.agent =="jsrl":
+            #     FLAGS.config.agent_kwargs["episode_length"] = finetune_env.spec.max_episode_steps
 
     """
     replay buffer
@@ -207,7 +215,6 @@ def main(_):
         seed=FLAGS.seed,
         discount=FLAGS.config.agent_kwargs.discount if FLAGS.agent == "calql" else None,
     )
-
     """
     Initialize agent
     """
@@ -221,7 +228,6 @@ def main(_):
         encoder_def=None,
         **FLAGS.config.agent_kwargs,
     )
-
     if FLAGS.resume_path != "":
         assert os.path.exists(FLAGS.resume_path), "resume path does not exist"
         agent = checkpoints.restore_checkpoint(FLAGS.resume_path, target=agent)
@@ -248,6 +254,7 @@ def main(_):
             "average_return": np.mean([np.sum(t["rewards"]) for t in trajs]),
             "average_traj_length": np.mean([len(t["rewards"]) for t in trajs]),
         }
+        print("Eval results: ", eval_info)
         if env_type == "adroit-binary":
             # adroit
             eval_info["success_rate"] = np.mean(
@@ -266,6 +273,8 @@ def main(_):
             )
 
         wandb_logger.log({"evaluation": eval_info}, step=step_number)
+        # return the primary scalar so callers can react (e.g. call agent.eval_callback)
+        return eval_info["average_return"], eval_info["average_traj_length"]
 
     """
     training loop
@@ -275,7 +284,6 @@ def main(_):
     is_online_stage = False
     observation, info = finetune_env.reset()
     done = False  # env done signal
-
     for _ in tqdm.tqdm(range(step, FLAGS.num_offline_steps + FLAGS.num_online_steps)):
         """
         Switch from offline to online
@@ -307,13 +315,16 @@ def main(_):
         """
         Env Step
         """
+        env_step = 0
         with timer.context("env step"):
             if is_online_stage:
                 rng, action_rng = jax.random.split(rng)
-                action = agent.sample_actions(observation, seed=action_rng)
+                action = agent.sample_actions(observation, env_step, seed=action_rng)
                 next_observation, reward, done, truncated, info = finetune_env.step(
                     action
                 )
+                
+                env_step += 1
 
                 transition = dict(
                     observations=observation,
@@ -329,6 +340,7 @@ def main(_):
                 if done or truncated:
                     observation, info = finetune_env.reset()
                     done = False
+                    env_step = 0
 
         """
         Updates
@@ -400,7 +412,7 @@ def main(_):
                     evaluate_with_trajectories, clip_action=FLAGS.clip_action
                 )
 
-                evaluate_and_log_results(
+                avg_return, avg_length = evaluate_and_log_results(
                     eval_env=eval_env,
                     policy_fn=policy_fn,
                     eval_func=eval_func,
@@ -408,6 +420,11 @@ def main(_):
                     wandb_logger=wandb_logger,
                 )
 
+                # If the agent defines an eval_callback, call it
+                if hasattr(agent, "eval_callback"):
+                    agent = agent.eval_callback(avg_return, np.floor(avg_length))
+                    new_cmprtr = getattr(agent, "cmprtr", 0.0)
+                    wandb_logger.log({"evaluation": {"cmprtr": new_cmprtr}}, step=step)
         """
         Save Checkpoint
         """
@@ -423,9 +440,9 @@ def main(_):
         """
         Logging
         """
-        print(f"{step}/{FLAGS.num_offline_steps + FLAGS.num_online_steps}")
         if step % FLAGS.log_interval == 0:
-            print(f"{step}/{FLAGS.num_offline_steps + FLAGS.num_online_steps}, logging if update info...")
+            if step%1000 == 0:
+                print(f"{step}/{FLAGS.num_offline_steps + FLAGS.num_online_steps}, logging if update info...")
             # check if update_info is available (False during warmup)
             if "update_info" in locals():
                 print(f"{step}/{FLAGS.num_offline_steps + FLAGS.num_online_steps}, logging...")
