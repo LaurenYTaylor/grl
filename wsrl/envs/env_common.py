@@ -1,5 +1,5 @@
 from typing import Optional
-
+import vmas
 import d4rl
 import gym
 import mj_envs
@@ -76,6 +76,8 @@ def get_env_type(env_name):
         env_type = "kitchen"
     elif "halfcheetah" in env_name or "hopper" in env_name or "walker" in env_name:
         env_type = "locomotion"
+    elif env_name in vmas.scenarios or env_name in vmas.debug_scenarios or env_name in vmas.mpe_scenarios:
+        env_type="vmas"
     else:
         raise RuntimeError(f"Unknown environment type for {env_name}")
 

@@ -5,7 +5,7 @@ from experiments.configs.iql_config import get_config as get_iql_config
 from experiments.configs.sac_config import get_config as get_sac_config
 from experiments.configs.wsrl_config import get_config as get_wsrl_config
 from experiments.configs.jsrl_config import get_config as get_jsrl_config
-from experiments.configs.jsrl_calql_config import get_config as get_jsrl_calql_config
+from experiments.configs.jsrl_sac_config import get_config as get_jsrl_sac_config
 from experiments.configs.pex_config import get_config as get_pex_config
 from experiments.configs.grl_config import get_config as get_grl_config
 
@@ -64,9 +64,9 @@ def get_config(config_string):
             )
         ),
 
-        "antmaze_jsrl_calql": ConfigDict(
+    "antmaze_jsrl_sac": ConfigDict(
             dict(
-                agent_kwargs=get_jsrl_calql_config(
+                agent_kwargs=get_jsrl_sac_config(
                     updates=dict(
                         policy_kwargs=dict(
                             tanh_squash_distribution=True,
@@ -199,7 +199,22 @@ def get_config(config_string):
                 ).to_dict(),
             )
         ),
-
+        "adroit_jsrl":ConfigDict(
+            dict(
+                agent_kwargs=get_iql_config(
+                    updates=dict(
+                        policy_network_kwargs=dict(
+                            hidden_dims=(256, 256),
+                            kernel_init_type="var_scaling",
+                            kernel_scale_final=1e-2,
+                            dropout_rate=0.1,
+                        ),
+                        expectile=0.7,
+                        temperature=0.5,
+                    ),
+                ).to_dict(),
+            )
+        ),
         "adroit_wsrl": ConfigDict(
             dict(
                 agent_kwargs=get_wsrl_config(
@@ -331,7 +346,16 @@ def get_config(config_string):
                 ).to_dict(),
             )
         ),
-
+        "locomotion_jsrl":ConfigDict(
+            dict(
+                agent_kwargs=get_iql_config(
+                    updates=dict(
+                        expectile=0.7,
+                        temperature=3.0,
+                    )
+                ).to_dict(),
+            )
+        ),
         "locomotion_pex":ConfigDict(
             dict(
                 agent_kwargs=get_pex_config(

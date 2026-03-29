@@ -6,7 +6,7 @@ from .sac import SACAgent
 from .jsrl import JSRLAgent
 from .jsrl_random import JSRLRandomAgent
 from .pex import PEXAgent
-from .jsrl_calql import JSRLCalQLAgent
+from .jsrl_sac import JSRLSACAgent
 from .grl_sac import GRLSACAgent
 
 agents = {
@@ -17,7 +17,7 @@ agents = {
     "sac": SACAgent,
     "jsrl": JSRLAgent,
     "jsrl_random": JSRLRandomAgent,
-    "jsrl_calql": JSRLCalQLAgent,
+    "jsrl_sac": JSRLSACAgent,
     "pex": PEXAgent,
     "grl": GRLSACAgent,
 }

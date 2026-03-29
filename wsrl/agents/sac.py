@@ -182,7 +182,6 @@ class SACAgent(flax.struct.PyTreeNode):
         sample_n_actions = (
             self.config["n_actions"] if self.config["max_target_backup"] else None
         )
-
         next_actions, next_actions_log_probs = self.forward_policy_and_sample(
             batch["next_observations"],
             rng,
@@ -292,7 +291,13 @@ class SACAgent(flax.struct.PyTreeNode):
             rng=policy_rng,
             grad_params=params,
         )
+        
         actions, log_probs = action_distributions.sample_and_log_prob(seed=sample_rng)
+        
+        # if self.config.get("guided_rl", False):
+        #     actions = batch["actions"]
+        #     log_probs = action_distributions.log_prob(jnp.clip(actions, -0.99, 0.99))
+            
 
         predicted_qs = self.forward_critic(
             batch["observations"],
@@ -420,7 +425,7 @@ class SACAgent(flax.struct.PyTreeNode):
     def sample_actions(
         self,
         observations: Data,
-        env_step: int,
+        env_step: Data,
         *,
         seed: Optional[PRNGKey] = None,
         argmax: bool = False,

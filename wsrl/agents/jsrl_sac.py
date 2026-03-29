@@ -20,8 +20,9 @@ from wsrl.common.typing import Batch, Data, Params, PRNGKey
 from wsrl.common.common import nonpytree_field
 
 
-class JSRLCalQLAgent(SACAgent):
-    """CalQL agent extended with a frozen guide policy and evaluation callback
+
+class JSRLSACAgent(SACAgent):
+    """SAC agent extended with a frozen guide policy and evaluation callback
     similar to the JSRL agent. The guide policy is loaded from a checkpoint
     and stored as a FrozenDict on `guide_policy` (non-pytree)."""
 
@@ -45,9 +46,7 @@ class JSRLCalQLAgent(SACAgent):
         argmax: bool = False,
     ) -> jnp.ndarray:
         # Build PRNGKey
-        key = jax.random.PRNGKey(seed[0] if seed is not None else 0)
-        sel_key, sample_key = jax.random.split(key)
-        operand = (observations, sample_key)
+        operand = (observations, seed)
 
         def guide_branch(args):
             obs, rng = args
@@ -56,38 +55,96 @@ class JSRLCalQLAgent(SACAgent):
                 dist = self.forward_policy(obs, rng, grad_params=None, train=False)
             else:
                 dist = self.forward_policy(obs, rng, grad_params=self.guide_policy, train=False)
-            if argmax:
-                return dist.mode()
-            else:
-                return dist.sample(seed=rng)
+            return dist.mode()
 
         def learner_branch(args):
             obs, rng = args
-            dist = self.forward_policy(obs, rng, grad_params=None, train=False)
+            dist = self.forward_policy(obs, rng, train=False)
             if argmax:
                 return dist.mode()
             else:
                 return dist.sample(seed=rng)
 
-        actions = jax.lax.cond(env_step > self.cmprtr, learner_branch, guide_branch, operand)
+        actions = jax.lax.cond((env_step > self.cmprtr), learner_branch, guide_branch, operand)
         return actions
     
-    def eval_callback(self, avg_return: float, avg_length: int) -> "JSRLCalQLAgent":
+    def _compute_next_actions(self, batch, rng):
+        """shared computation between loss functions"""
+        batch_size = batch["rewards"].shape[0]
+        sample_n_actions = (
+            self.config["n_actions"] if self.config["max_target_backup"] else None
+        )
+        next_actions, next_actions_log_probs = self.forward_policy_and_sample(
+            batch["next_observations"],
+            batch["ts"],
+            rng,
+            repeat=sample_n_actions,
+        )
+
+        if sample_n_actions:
+            chex.assert_shape(next_actions_log_probs, (batch_size, sample_n_actions))
+        else:
+            chex.assert_shape(next_actions_log_probs, (batch_size,))
+        return next_actions, next_actions_log_probs
+    
+    def forward_policy_and_sample(
+        self,
+        obs: Data,
+        ts: Data,
+        rng: PRNGKey,
+        *,
+        grad_params: Optional[Params] = None,
+        repeat=None,
+    ):
         """
-        Called after an evaluation. If the provided avg_return improves upon
-        the stored `best_eval_score`, update `best_eval_score` and decay
-        `cmprtr` multiplicatively by `decay_factor`. Returns a new agent
-        instance (PyTree) with updated fields.
+        For each element in the batch, if ts[i] > self.cmprtr, use the learner policy,
+        else use the guide policy (if available). Returns new_actions, log_pi.
         """
-        # If no previous score, treat this as an improvement.
-        
-        if (self.best_eval_score is None) or (avg_return >= self.best_eval_score):
-            new_best = float(avg_return)
+        rng, sample_rng = jax.random.split(rng)
+        action_dist = self.forward_policy(obs, rng, grad_params=grad_params)
+
+        # Compute actions and log_pi for both guide and learner, with repeat logic
+        if repeat:
+            learner_actions, learner_log_pi = action_dist.sample_and_log_prob(seed=sample_rng, sample_shape=repeat)
+            learner_actions = jnp.transpose(learner_actions, (1, 0, 2))  # (batch, repeat, action_dim)
+            learner_log_pi = jnp.transpose(learner_log_pi, (1, 0))  # (batch, repeat)
+            if self.guide_policy is not None:
+                guide_dist = self.forward_policy(obs, rng, grad_params=self.guide_policy, train=False)
+                guide_actions, guide_log_pi = guide_dist.sample_and_log_prob(seed=sample_rng, sample_shape=repeat)
+                guide_actions = jnp.transpose(guide_actions, (1, 0, 2))
+                guide_log_pi = jnp.transpose(guide_log_pi, (1, 0))
+            else:
+                guide_actions, guide_log_pi = learner_actions, learner_log_pi
+        else:
+            learner_actions, learner_log_pi = action_dist.sample_and_log_prob(seed=sample_rng)
+            if self.guide_policy is not None:
+                guide_dist = self.forward_policy(obs, rng, grad_params=self.guide_policy, train=False)
+                guide_actions, guide_log_pi = guide_dist.sample_and_log_prob(seed=sample_rng)
+            else:
+                guide_actions, guide_log_pi = learner_actions, learner_log_pi
+
+        # Select for each batch element based on ts vs cmprtr
+        use_learner = ((ts+1) >= (self.cmprtr))
+        #import pdb;pdb.set_trace()
+        new_actions = jnp.where(jnp.repeat(use_learner,repeat).reshape(len(ts),repeat,1), learner_actions, guide_actions)
+        log_pi = jnp.where(jnp.repeat(use_learner,repeat).reshape(len(ts),repeat), learner_log_pi, guide_log_pi)
+        return new_actions, log_pi
+    
+    def eval_callback(self, avg_return: float, avg_length: int) -> "JSRLSACAgent":
+        # if (self.n_curriculum_stages == 0): 
+        #     return self
+        if (self.best_eval_score is None) or (avg_return >= 0.95*self.best_eval_score):
             if (self.best_eval_score is None):
-                new_cmprtr = avg_length
-                decay_factor = jax.numpy.floor(avg_length/self.n_curriculum_stages)
+                new_best = float(avg_return)
+                if (self.n_curriculum_stages <= 0):
+                    new_cmprtr = 0
+                    decay_factor = 0
+                else:
+                    new_cmprtr = avg_length
+                    decay_factor = jax.numpy.floor(avg_length/self.n_curriculum_stages)
                 return self.replace(cmprtr=new_cmprtr, best_eval_score=new_best, decay_factor=decay_factor)
             else:
+                new_best = max(float(avg_return), self.best_eval_score)
                 new_cmprtr = float(max(0.0, self.cmprtr - self.decay_factor))
                 return self.replace(cmprtr=new_cmprtr, best_eval_score=new_best)
         return self
@@ -133,14 +190,14 @@ class JSRLCalQLAgent(SACAgent):
                 logging.error("guide_policy_path specified but file not found: %s", guide_policy_path)
                 sys.exit(1)
 
-        # require guide_policy by default for JSRL-CalQL
-        assert guide_policy is not None, "a guide_policy must be provided through the guide_policy_path kwarg"
+        # require guide_policy by default for JSRL-SAC
+        if n_curriculum_stages > 0:
+            assert guide_policy is not None, "a guide_policy must be provided through the guide_policy_path kwarg"
 
-        kwargs["use_calql"] = True
         kwargs["n_curriculum_stages"] = n_curriculum_stages
         # Remove from kwargs if present, to avoid double passing
         kwargs.pop("guide_policy_path", None)
-        agent = super().create(*args, **kwargs)
+        agent = super(JSRLSACAgent, cls).create(*args, **kwargs)
         # Use .replace to set non-pytree fields
         agent = agent.replace(guide_policy=guide_policy, n_curriculum_stages=n_curriculum_stages)
         return agent

@@ -9,7 +9,5 @@ python3 finetune.py \
 --project locomotion-finetune \
 --reward_scale 1.0 \
 --reward_bias 0.0 \
---n_eval_trajs 100 \
---eval_interval 5_000 \
 --num_offline_steps 250_000 \
 $@

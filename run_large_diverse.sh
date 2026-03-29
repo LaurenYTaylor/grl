@@ -1,0 +1,1 @@
+nohup sh -c 'bash experiments/scripts/antmaze/launch_iql_finetune.sh --use_redq --env antmaze-large-diverse-v2; bash experiments/scripts/antmaze/launch_cql_finetune.sh --use_redq --env antmaze-large-diverse-v2' &

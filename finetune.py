@@ -80,6 +80,7 @@ flags.DEFINE_string(
 )
 flags.DEFINE_string("resume_path", "", "Path to resume from")
 flags.DEFINE_string("guide_policy_path", "", "Path to restore guide agent from")
+flags.DEFINE_integer("n_curriculum_stages", 10, "N curriculum stages")
 flags.DEFINE_integer("log_interval", 5_000, "Log every n steps")
 flags.DEFINE_integer("eval_interval", 20_000, "Evaluate every n steps")
 flags.DEFINE_integer("save_interval", 100_000, "Save every n steps.")
@@ -116,6 +117,9 @@ def main(_):
         
     if "guide_policy_path" in FLAGS.config.agent_kwargs:
         FLAGS.config.agent_kwargs["guide_policy_path"] = FLAGS.guide_policy_path
+        
+    if "n_curriculum_stages" in FLAGS.config.agent_kwargs:
+        FLAGS.config.agent_kwargs["n_curriculum_stages"] = FLAGS.n_curriculum_stages
 
     min_steps_to_update = FLAGS.batch_size * (1 - FLAGS.offline_data_ratio)
     if FLAGS.agent == "calql":
@@ -201,9 +205,9 @@ def main(_):
                 reward_bias=FLAGS.reward_bias,
                 clip_action=FLAGS.clip_action,
             )
-            # if FLAGS.agent =="jsrl":
-            #     FLAGS.config.agent_kwargs["episode_length"] = finetune_env.spec.max_episode_steps
 
+    dataset["ts"] = -1*np.ones_like(dataset["rewards"])  # placeholder for time step within episode
+    
     """
     replay buffer
     """
@@ -271,6 +275,7 @@ def main(_):
             ] = np.mean(
                 [eval_env.get_normalized_score(np.sum(t["rewards"])) for t in trajs]
             )
+            print(eval_info)
 
         wandb_logger.log({"evaluation": eval_info}, step=step_number)
         # return the primary scalar so callers can react (e.g. call agent.eval_callback)
@@ -333,6 +338,7 @@ def main(_):
                     rewards=reward,
                     masks=1.0 - done,
                     dones=1.0 if (done or truncated) else 0,
+                    ts=env_step
                 )
                 replay_buffer.insert(transition)
 

@@ -1,1 +1,3 @@
-nohup sh -c 'parallel -j 32 --results logs/ --joblog job_history_killed.log < run_killed_commands.txt ; parallel -j 32 --results logs/ --joblog job_history_ft.log < run_finetune_commands.txt ; parallel -j 32 --results logs/ --joblog job_history_iqlcql.log < run_iqlcql_commands.txt' &
+#nohup sh -c 'parallel -j 32 --results logs/ --joblog job_history_killed.log < run_killed_commands.txt ; parallel -j 32 --results logs/ --joblog job_history_ft.log < run_finetune_commands.txt ; parallel -j 32 --results logs/ --joblog job_history_iqlcql.log < run_iqlcql_commands.txt' &
+#nohup sh -c 'parallel -j 4 --results logs/ --joblog job_history_jsrl.log < run_commands_jsrl.txt ; parallel -j 1 --results logs/ --joblog job_history.log < run_commands.txt' &
+#nohup sh -c 'parallel -j 2 --results logs/ --joblog job_history_grl.log < run_commands_jsrl.txt ;' &

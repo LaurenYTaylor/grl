@@ -1,0 +1,1 @@
+bash experiments/scripts/antmaze/launch_jsrl_finetune.sh --use_redq --env antmaze-umaze-v2 --debug --resume_path /home/lt/Documents/Code/wsrl/exp_logging/wsrl/_antmaze-umaze-diverse-v2_iql_seed0_20251028_062916_rnd424113/checkpoint_1000000
